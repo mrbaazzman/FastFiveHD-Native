@@ -7,6 +7,10 @@ for running *Fast Five HD* on desktop Windows x64.  It contains **none of the
 game**.  The game is not here, and you cannot play it without supplying your
 own copy of the game files.
 
+The MIT licence in `LICENSE` covers exactly those parts: `recomp/`, `runtime/`,
+`tools/`, `analysis/` and `docs/`.  It covers none of the game's content,
+because none of the game's content is here.
+
 ## What is in this repository
 
 | Path | What it is | Copyright |
