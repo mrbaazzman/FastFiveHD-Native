@@ -42,6 +42,8 @@ equivalent mount).  No other folders are read or written.
   game data, the decompiler dumps, the generated translation units and the frame captures are
   excluded by `.gitignore` and stay on the machine that owns them.  The published repository
   (`public/`) contains the toolchain, the platform layer, the tools and the documentation only.
+  `tools/make_public_repo.py` assembles it, and it is verified by building and running it
+  against the game and comparing the frames with this working tree.
 
 ## R5 — Continuity
 

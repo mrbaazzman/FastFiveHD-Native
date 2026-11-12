@@ -7,6 +7,22 @@
 > part of the published repository.  `tools/run_test.py` regenerates the captures on a machine
 > that has the game.
 
+## The published repository
+
+`public/` is the tree that gets published.  It is a **clean subset**: the recompiler
+(`recomp/`), the native platform layer (`runtime/`), the tools, the analysis helpers and the
+documentation — and nothing that is derived from the shipped game.
+
+| Published | Kept local only (never committed) |
+|---|---|
+| `recomp/`, `runtime/`, `tools/`, `docs/`, `analysis/` | the APK, `libFast5.so`, `GloftF5HP/` |
+| `LICENSE` (MIT), `NOTICE.md`, `README.md`, `SETUP.md` | `build/link/` — the 329 MB of generated C |
+| `docs/diagrams/architecture.svg` | the P-code dumps, the Ghidra project, the frame captures |
+
+`tools/make_public_repo.py` assembles it from this working copy.  It was verified end to end:
+the published tree was built, linked and run against the game, and the resulting frames are
+**pixel-identical** to this working tree (mean absolute difference 0.0000 over frames 30/120/240).
+
 ## 2026-11-11 — Full HD: the game presents correctly at 1920×1080 (current)
 
 ### The rule
