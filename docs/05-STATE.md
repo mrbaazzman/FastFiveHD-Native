@@ -46,8 +46,76 @@ Measured, on the licence text (the reference render against the 1080p render):
 
 | Fit | Width / height | Distortion vs the reference |
 |---|---|---|
-| `fill` (before) | 11.400 | **+5.3 %** (stretched) |
-| `letterbox` (now the default) | 10.692 | −1.2 % (pixel quantisation; the uniform 2.25× expects 10.824) |
+| `fill` (the default) | 11.400 | **+5.3 %** (stretched) |
+| `letterbox` | 10.692 | −1.2 % (pixel quantisation; the uniform 2.25× expects 10.824) |
+
+`fill` stays the default: the 2D layer is a user interface, so having the HUD reach the screen
+edges matters more than a 6.7 % difference in the letterforms.  `crop` is the undistorted
+alternative that still covers the window, and `letterbox` the fully undistorted one.
+
+### The engine's own resolution independence — and why the default is what it is
+
+`Application::Init` computes an *application scale* (`this+600`): `2.0` if `SCR_WIDTH > 480`,
+else `1.0`, and a logical size of `screen/scale`.  That looks like a resolution-independence
+mechanism, and the HUD does use it (`HudManager::InitButtons` anchors every element to
+`SCR_WIDTH`/`SCR_HEIGHT`).
+
+It is only half of one — measured:
+
+* `notifyTouchPress` divides the incoming touch by the scale, so the guest expects the touch
+  in *screen* space.
+* `CSprite::GetScaleFactor` returns the scale for sprites with `m_bPositionScale` set, so it
+  scales **positions**, not the artwork.
+* `CFont::DrawString` places the glyphs at a scaled position but draws them at their
+  **authored pixel size** — the bitmap font never grows.
+
+So the 2D *screens* (the Universal logo, the loading widgets, the "ARE YOU SURE?" dialog) stay
+where they were authored for the 400×240 logical space.  Letting the engine lay them out for
+the window (`FAST5_UI_2D=native`) puts the logo in the **top-left corner** — measured: the logo
+is at `(143, 124)` of the guest's screen space at *every* window size (1920×1080, 1280×720 and
+960×540 all give the same coordinates), so it is centred in an 800-wide screen and in the corner
+of a 1920-wide one.  The 3D scenes are composed for the canvas as well, so a 2D transform cannot
+re-centre it.
+
+**The two properties are mutually exclusive with this game's assets:**
+
+| | crisp 1:1 artwork | correctly composed screens |
+|---|---|---|
+| `design` (default) | no — the canvas is magnified 2.25–2.4× | **yes** — every screen exactly as on the reference device, the HUD on the screen edges |
+| `native` | **yes** — drawn 1:1 | no — the canvas-authored screens land in the corner |
+
+The artwork is 800×480 pixels (a 400×240 set plus one 2× "highres" set — there is nothing
+bigger), so filling a 1920×1080 window *is* a 2.25× magnification.  The magnification looks
+good: the 1:1 crop of the "Appearance" tab at 1080p is sharp, because the GPU filters the
+upscale.
+
+One real bug came out of the experiment: the host forced the window's aspect ratio onto **every**
+camera, including the off-screen ones.  The engine computes each camera's aspect from its own
+render target, so the override is only needed when the engine itself runs at the design
+resolution; it is now applied only there.
+
+### The three ways to fit a 5:3 canvas into a 16:9 window
+
+The canvas is 800×480 (5:3) and the window is usually 16:9, so no single affine map can both
+fill the window and keep the aspect ratio.  `FAST5_UI_FIT` picks which one gives:
+
+| Mode | Scale at 1920×1080 | The 2D layer | The cost |
+|---|---|---|---|
+| `fill` (default) | 2.4000 / 2.2500 | covers the window; the HUD reaches the screen edges | the artwork and the text are 6.7 % wider than the reference (faintly visible in the lettering) |
+| `crop` | 2.4000 / 2.4000 | covers the window, undistorted | 36 px (3 %) of the canvas is cut off top and bottom: the top of the GARAGE title and the bottom of the stat bars are clipped |
+| `letterbox` | 2.2500 / 2.2500 | undistorted, centred | the HUD is inset 60 px (3 %) from the screen edges |
+
+Measured on the licence text (the reference render against the 1080p render):
+
+| Fit | Width / height | Distortion vs the reference |
+|---|---|---|
+| `fill` | 11.400 | **+5.3 %** (stretched) |
+| `letterbox` | 10.692 | −1.2 % (pixel quantisation; the uniform 2.25× expects 10.824) |
+
+`fill` is the default because the 2D layer is a *user interface*: having the HUD reach the
+screen edges matters more than a 6.7 % difference in the letterforms.  `crop` is the
+undistorted alternative that still covers the window, at the cost of clipping the canvas's top
+and bottom; `letterbox` is the fully undistorted one.
 
 ### The other half: the engine's own resolution independence
 

@@ -77,9 +77,10 @@ corner of a large screen.  The port therefore keeps the guest's canvas and conve
 
 One transform (`runtime/resolution.c`) is shared by every consumer — the 2D draw, the pointer,
 the 3D pick, the camera aspect — so they cannot drift apart.  The canvas is 5:3 and the window
-usually is not, so it is fitted with **one uniform scale** and centred: the artwork and the text
-keep the reference proportions exactly, at any window size.  That is the *global resolution
-changer* — change the window size and the whole layer follows.
+usually is not, so `FAST5_UI_FIT` picks what gives: `fill` (the default) lets the canvas cover
+the window, `crop` covers it without distorting it but clips the canvas's top and bottom, and
+`letterbox` keeps the proportions and centres the canvas.  Change the window size and the whole
+layer follows — that is the *global resolution changer*.
 
 Getting there required finding several separate traps, each documented in
 [`docs/05-STATE.md`](docs/05-STATE.md):
@@ -168,7 +169,7 @@ The port reads the game data **in place** and never writes to it.  It creates it
 | Variable | Default | Effect |
 |---|---|---|
 | `FAST5_WIDTH` / `FAST5_HEIGHT` | `1920` / `1080` | the presentation size of the window |
-| `FAST5_UI_FIT` | `letterbox` | `fill` stretches each axis instead (the layer then covers the window, at the cost of 6.7 % distortion at 1080p) |
+| `FAST5_UI_FIT` | `fill` | `crop` fits the canvas undistorted and covers the window (clipping the canvas's top and bottom); `letterbox` keeps the proportions and centres the canvas |
 | `FAST5_ENGINE_RES` | `native` | `design` runs the engine at 800×480 instead of the window size |
 | `FAST5_UI_2D` | `design` | `native` lets the engine lay the 2D layer out for the window (see below) |
 | `FAST5_WINDOWED` | off | force a framed window instead of borderless |

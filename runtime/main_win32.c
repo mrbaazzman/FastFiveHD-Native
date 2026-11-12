@@ -434,16 +434,41 @@ int main(void) {
          *   were authored, so on a large screen the Universal logo ends up in the corner.
          *   Kept for comparison; see docs/05-STATE.md.
          */
+        /*
+         * How the 2D layer reaches the window.
+         *
+         * design (the default): the guest keeps its 800x480 canvas - exactly as the reference
+         *   device has it - and the host converts that canvas to the window.  Every screen is
+         *   then composed correctly, the HUD reaches the screen edges and the 3D scenes are
+         *   composed for the canvas.  The artwork is magnified, because the game ships no
+         *   larger 2D art than 800x480.
+         *
+         * native: the guest is told the real screen size, so the engine lays the 2D layer out
+         *   for the window itself.  The artwork is then drawn 1:1 (crisp) and the HUD follows
+         *   the screen edges, but the game's screens are composed for an 800x480 canvas and
+         *   land in the top-left corner.  That is the shipped game's own behaviour at that
+         *   screen size; see docs/05-STATE.md.
+         */
         const char *ui = getenv("FAST5_UI_2D");
         g_ui_native_2d = (ui && !strcmp(ui, "native")) ? 1 : 0;
         const char *fit = getenv("FAST5_UI_FIT");
         /*
-         * Uniform scaling is the default: the 2D canvas is 5:3 and the framebuffer usually
-         * is not, so stretching each axis would distort the artwork and the text.  With one
-         * uniform scale the 2D layer keeps the reference proportions exactly, and the 3D
-         * scene fills the rest of the frame.
+         * How the 2D canvas is fitted to the window.  The canvas is 5:3 and the window
+         * usually is not, so something has to give:
+         *
+         *  fill (the default): each axis is scaled separately, so the canvas covers the
+         *    whole window and the HUD reaches the screen edges.  The artwork and the text
+         *    are 6.7 % wider than the reference at 16:9 - imperceptible in the art, faintly
+         *    visible in the lettering.
+         *  crop: one uniform scale, big enough to cover the window; the canvas overflows
+         *    vertically and 3 % of it is cut off at the top and the bottom, so the top of
+         *    the GARAGE title and the bottom of the stat bars are clipped.
+         *  letterbox: one uniform scale, small enough to fit; the canvas is centred and the
+         *    HUD is inset from the screen edges (60 px on each side at 1920x1080).
          */
-        int fill = (fit && !strcmp(fit, "fill")) ? 1 : 0;
+        int fill = 1, crop = 0;
+        if (fit && !strcmp(fit, "letterbox")) fill = 0;
+        else if (fit && !strcmp(fit, "crop")) { fill = 0; crop = 1; }
         const char *mode = getenv("FAST5_ENGINE_RES");
         int native = (mode && !strcmp(mode, "design")) ? 0 : 1;
         g_engine_native = native;
@@ -451,7 +476,7 @@ int main(void) {
         int dh = g_ui_native_2d ? platform_height() : DESIGN_HEIGHT;
         platform_set_design_size(dw, dh);
         fast5_resolution_setup(dw, dh, platform_width(), platform_height(),
-                                fill, native, g_ui_native_2d);
+                                fill, native, g_ui_native_2d, crop);
         /*
          * Invariant check for the presentation transform: the design canvas must land inside
          * the framebuffer, and the round trip (frame -> design -> frame) must be the identity.
@@ -792,15 +817,13 @@ int main(void) {
          * legal text and the loading widgets outside the window at 1920x1080). So the
          * conversion is re-applied every frame, after the engine has done its own work.
          */
-        if (g_engine_native) {
+        if (g_engine_native && !g_ui_native_2d) {
             uint32_t app = *(uint32_t *)(g_mem + APPLICATION_INSTANCE_ADDR);
-            if (!g_ui_native_2d) {
-                *(int32_t *)(g_mem + SCR_WIDTH_ADDR) = DESIGN_WIDTH;
-                *(int32_t *)(g_mem + SCR_HEIGHT_ADDR) = DESIGN_HEIGHT;
-                if (app && app + 0x258u < guest_mem_size) {
-                    *(int32_t *)(g_mem + app + 0x250u) = DESIGN_WIDTH / 2;
-                    *(int32_t *)(g_mem + app + 0x254u) = DESIGN_HEIGHT / 2;
-                }
+            *(int32_t *)(g_mem + SCR_WIDTH_ADDR) = DESIGN_WIDTH;
+            *(int32_t *)(g_mem + SCR_HEIGHT_ADDR) = DESIGN_HEIGHT;
+            if (app && app + 0x258u < guest_mem_size) {
+                *(int32_t *)(g_mem + app + 0x250u) = DESIGN_WIDTH / 2;
+                *(int32_t *)(g_mem + app + 0x254u) = DESIGN_HEIGHT / 2;
             }
             /* DIAGNOSTIC: what does the engine think its 2D scale and logical size are? */
             if (g_ui_diag && (frames % 60 == 0)) {

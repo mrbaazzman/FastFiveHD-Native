@@ -1905,8 +1905,19 @@ int call_override(Cpu *c, uint8_t *mem, uint32_t target) {
      *    pre-scaled to land where the host wants it.
      */
     if (target == 0x4d8228u) { /* CCameraSceneNode::setAspectRatio(this, float aspect) */
-        if (g_resolution.frame_w != g_resolution.design_w ||
-            g_resolution.frame_h != g_resolution.design_h) {
+        /*
+         * The scene data carries the aspect the game was composed for (5:3).  On a wider
+         * window the camera would stretch the scene, so the aspect follows the framebuffer.
+         *
+         * Only when the engine itself runs at the design resolution: there the engine's own
+         * aspect is the design's 5:3 and the window's is different.  When the engine runs at
+         * the window size it already computes each camera's aspect from that camera's own
+         * render target — and forcing the window's aspect onto the off-screen targets (the
+         * menu's RTT screens) is what split the Universal logo into two copies.
+         */
+        if (!g_resolution.engine_native &&
+            (g_resolution.frame_w != g_resolution.design_w ||
+             g_resolution.frame_h != g_resolution.design_h)) {
             /* The soft-float ABI passes the float in a core register (r1), not in s0:
              * the translated body stores c->r1 into this+0x140. */
             float old_aspect;

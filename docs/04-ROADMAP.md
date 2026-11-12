@@ -151,9 +151,12 @@ so the game logic, the hit rectangles and the 3D picking stay 1:1 with the refer
    transform is shared with the pointer and the 3D picking.
 3. **[x]** 3D scene rendered at the window resolution with the window's aspect ratio.
 4. **[x]** Render targets at the window resolution (2304×1296 instead of 960×576).
-5. **[x]** One uniform scale for the 2D layer (the default), so the artwork and the bitmap font
-   keep the reference proportions at any window size; `FAST5_UI_FIT=fill` stretches each axis
-   instead; `FAST5_ENGINE_RES=design` keeps the engine at 800×480.
+5. **[x]** The 2D layer is fitted to the window by one shared transform, in three selectable
+   ways: `fill` (the canvas covers the window), `crop` (undistorted and covering, at the cost
+   of clipping the canvas's top and bottom) and `letterbox` (undistorted, centred).
+   `FAST5_ENGINE_RES=design` keeps the engine at 800×480; `FAST5_UI_2D=native` lets the engine
+   lay the 2D layer out for the window (crisp, but the game's canvas-authored screens land in
+   the corner — see `docs/05-STATE.md`).
 6. **[x]** A start-up invariant check: the 2D canvas must land inside the framebuffer and the
    frame → design → frame round trip must be the identity.
 7. **[ ]** Live window resize (the EGL surface is created once at start-up).

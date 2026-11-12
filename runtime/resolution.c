@@ -6,7 +6,7 @@
 Fast5Resolution g_resolution;
 
 void fast5_resolution_setup(int design_w, int design_h, int frame_w, int frame_h,
-                             int fill, int engine_native, int ui_native) {
+                             int fill, int engine_native, int ui_native, int crop) {
     Fast5Resolution *r = &g_resolution;
     r->design_w = design_w > 0 ? design_w : 800;
     r->design_h = design_h > 0 ? design_h : 480;
@@ -51,6 +51,18 @@ void fast5_resolution_setup(int design_w, int design_h, int frame_w, int frame_h
         r->sy = py;
         r->ox = 0.0;
         r->oy = 0.0;
+    } else if (crop) {
+        /*
+         * One uniform scale, big enough to cover the framebuffer, centred: the canvas
+         * overflows on the axis that does not fit and the overflow is cut off.  The 2D layer
+         * covers the whole window and nothing is distorted, but the canvas loses a strip on
+         * one axis (3 % of the height at 1080p).
+         */
+        double s = px > py ? px : py;
+        r->sx = s;
+        r->sy = s;
+        r->ox = ((double)r->frame_w - (double)r->design_w * s) * 0.5;
+        r->oy = ((double)r->frame_h - (double)r->design_h * s) * 0.5;
     } else {
         /*
          * One uniform scale, so the 2D layer keeps the reference proportions exactly.  The
@@ -74,7 +86,8 @@ void fast5_resolution_setup(int design_w, int design_h, int frame_w, int frame_h
     fprintf(stderr,
             "resolution: design %dx%d -> frame %dx%d (%s, engine %s) scale %.4f/%.4f offset %.1f/%.1f\n",
             r->design_w, r->design_h, r->frame_w, r->frame_h,
-            fill ? "fill" : "letterbox", engine_native ? "native" : "design",
+            fill ? "fill" : (crop ? "crop" : "letterbox"),
+            engine_native ? "native" : "design",
             r->sx, r->sy, r->ox, r->oy);
 }
 

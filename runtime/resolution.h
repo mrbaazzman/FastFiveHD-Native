@@ -59,7 +59,7 @@ extern Fast5Resolution g_resolution;
  *   engine_native != 0  the engine runs at the framebuffer size
  */
 void fast5_resolution_setup(int design_w, int design_h, int frame_w, int frame_h,
-                             int fill, int engine_native, int ui_native);
+                             int fill, int engine_native, int ui_native, int crop);
 
 /* design pixels -> framebuffer pixels */
 void fast5_resolution_to_frame(double dx, double dy, double *fx, double *fy);
