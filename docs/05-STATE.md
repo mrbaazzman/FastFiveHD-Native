@@ -23,6 +23,214 @@ documentation — and nothing that is derived from the shipped game.
 the published tree was built, linked and run against the game, and the resulting frames are
 **pixel-identical** to this working tree (mean absolute difference 0.0000 over frames 30/120/240).
 
+## 2026-11-12 — Installation: one executable builds the port (current)
+
+### `FastFivePortBuilder.exe`
+
+The end user should not have to install Python to build a port.  `tools/builder_gui.py` is a
+small window — choose the APK, choose the game data folder, press **Build the port** — and
+`tools/build_builder.py` packages it with PyInstaller into a single file:
+
+```
+dist/FastFivePortBuilder.exe      10.9 MiB
+```
+
+It contains the whole Python side of the build: the bootstrap pipeline, the Ghidra dumper, the
+recompiler and the native build script.  It unpacks itself into
+`%LOCALAPPDATA%/FastFivePortBuilder/` and works there, so nothing is written outside that
+folder (the game data is only ever read).
+
+Ghidra and the C compiler are **not** bundled — they are not ours and they are large — so the
+builder finds them and says exactly what to install when they are missing.  It also finds a
+GLES2 backend (ANGLE) the same way the port itself does, and warns when there is none.
+
+### An installer, with a silent mode
+
+The window is an installer: pick the APK, the data folder and the install location, press
+**Install the game**, and a progress bar follows the steps.  Two command-line modes sit
+alongside it:
+
+* `FastFivePortBuilder.exe --apk ... --data ... --install ...` prints the pipeline to the
+  terminal;
+* `FastFivePortBuilder.exe /S --apk ... --data ... --install ...` is **silent**: no window, no
+  output, an exit code that says whether it worked, and the log in
+  `%LOCALAPPDATA%/FastFivePortBuilder/silent.log`.  That is the mode for unattended deployments.
+
+### No console window, anywhere
+
+Two separate things were opening windows:
+
+* the packaged builder was built with PyInstaller's `--console`, so it had a console of its own;
+* a **console program started from a windowed program opens a console window of its own** unless
+  it is told not to - `CreateNoWindow` / `CREATE_NO_WINDOW`.  The build steps (the compiler,
+  the junction that points at the game data, the translator) were each flashing one.
+
+Every child process now starts with `CREATE_NO_WINDOW` (`tools/pyrun.py` has the flag, and the
+few places that shell out directly use it), the packaged programs are `--windowed`, and the C#
+installer launches the builder with `CreateNoWindow`.  Measured: a full install opens no console
+window at all.
+
+### No console window
+
+The first packaged builder was built with PyInstaller's `--console`, so a black console window
+appeared behind the interface (and flashed before the code could hide it).  It is built
+`--windowed` instead: **no console window is created at all**.  The command-line mode attaches
+the parent's console (`AttachConsole(ATTACH_PARENT_PROCESS)`) so that
+`FastFivePortBuilder.exe --apk ... --data ...` still prints into the terminal it was started
+from.
+
+That was not enough: a *console* program started from a *windowed* program opens a console
+window **of its own**, so the build steps (the compiler, Ghidra, the scripts) each put one on
+the screen — a swarm of them.  Every child is now started with `CREATE_NO_WINDOW`
+(`tools/pyrun.py`), so nothing appears on the screen.  Measured: a silent install opens zero
+console windows.
+
+### The trap: `sys.executable` inside a frozen application
+
+Inside a PyInstaller one-file executable, `sys.executable` is **that executable**, not a Python
+interpreter.  The build steps call each other (`bootstrap.py` runs `dump_pcode.py`,
+`link_all.py`, `build_win.py`), so the first version of the builder ran *itself*, in a loop,
+45 times over.
+
+The fix is `tools/pyrun.py`: in a frozen application a script is run by re-executing this
+executable with `--internal-run <script>`, which runs the script in this very interpreter
+(`runpy.run_path`).  Every step goes through it, so the pipeline behaves identically whether it
+is started from a checkout or from the packaged executable.
+
+### The builder is not allowed to eat the machine
+
+The first version of the builder drove the compile with one job per core, and the analysis with
+Ghidra's default heap - which is a *quarter of the machine's memory*, so 8 GB on a 32 GB box.
+Measured peaks:
+
+| Step | Peak |
+|---|---|
+| the compile, 12 parallel jobs | 5.0 GiB (about 500 MB per job: gcc plus its `cc1`) |
+| the compile, 8 parallel jobs | 4.0 GiB |
+| Ghidra's analysis | its heap, now capped at 2 GB |
+| the translation | about 1 GiB (the function bodies) |
+
+So:
+
+* the compile runs `min(CPUs, free memory, 8)` jobs - `tools/hostinfo.py` reads the free memory
+  through the Windows API, with no dependencies - and prints the choice;
+* Ghidra's heap is capped with `-maxheap 2g` (`FAST5_GHIDRA_HEAP` changes it).
+
+A small machine now builds slowly instead of swapping.
+
+### The installer puts the game somewhere
+
+The builder used to leave the result in its work folder.  `tools/installer.py` now installs it
+where the user asks:
+
+```
+<install>/
+    fast5_win.exe      the native port
+    play.bat           a launcher (the game must start in this folder - it finds its data
+                       relative to the working directory)
+    GloftF5HP/res/...  the game data, copied - never moved, never modified
+    build/userdata/    the game's writable data
+```
+
+The GUI has an **"Install to:"** field (default `%LOCALAPPDATA%\Programs\Fast Five HD`), the
+command line takes `--install <folder>`, and the **Play** button launches the *installed* copy.
+
+The install also copies `build/guest.bin` — the relocated guest image the port loads at
+start-up — which the first version forgot, so the installed game stopped with
+`build/guest.bin: No such file or directory`.
+
+### The end user needs nothing but the game
+
+The builder used to *require* Ghidra, a JDK and a C compiler to be installed.  That is not
+something an end user should have to do, so `tools/prereq.py` looks for each of them and, when
+it is missing, downloads the official package, verifies its SHA-256 and unpacks it into
+`%LOCALAPPDATA%/FastFivePortBuilder/tools/`:
+
+| Tool | Why | Package |
+|---|---|---|
+| Ghidra 12.1.4 | the analysis of the library | the official NSA release (543 MB) |
+| Eclipse Temurin JDK 21 | Ghidra runs on it | the official Adoptium build (196 MB) |
+| MinGW-w64 GCC 16.2 | the compiler | the WinLibs build (263 MB) |
+
+What is already on the machine is used instead and never downloaded: a Ghidra on `PATH`, in
+`GHIDRA_INSTALL_DIR` or inside WSL; a JDK 21+ (the version is checked — Ghidra 12 will not run
+on 17); a `gcc` on `PATH`.
+
+Measured: 740 MB of downloads and unpacking in **44 seconds** (24 MB/s), and the analysis with
+the fetched native-Windows Ghidra takes **2 min 39 s** — faster than the same Ghidra inside
+WSL (4 min 14 s), because there is no virtual machine in between.
+
+So the end user needs the APK, the game data and an internet connection for the first run.
+
+### What the builder does not do
+
+It does not *bundle* Ghidra (543 MB), a JDK (196 MB) or a compiler (263 MB) inside the
+executable — it **fetches** them when they are missing, which keeps the download small and
+means a machine that already has them never downloads them.  `FAST5_PREREQ_DIR` chooses where
+they live, and `--no-download` turns the fetching off (the builder then only reports what is
+missing).
+
+## 2026-11-12 — Installation: one command builds the port (current)
+
+### The goal
+
+An end user should be able to go from *the APK and the game data* to a running
+`build/fast5_win.exe` without knowing anything about Ghidra, P-code or the recompiler.
+
+### `tools/bootstrap.py`
+
+One command, seven steps, each of them a tool that could be run on its own:
+
+| Step | What | Tool |
+|---|---|---|
+| 1 | check the toolchain (Python, a C compiler, Ghidra) and the free disk | — |
+| 2 | extract `lib/armeabi-v7a/libFast5.so` from the APK and verify its SHA-256 | — |
+| 3 | link the game data into the tree (a link, not a 775 MB copy) | — |
+| 4 | build the relocated guest image | `tools/patch_guest.py` |
+| 5 | analyse the library in Ghidra and dump its P-code | `tools/dump_pcode.py` |
+| 6 | translate every function to C | `recomp/link_all.py` |
+| 7 | compile and link the binary | `tools/build_win.py` |
+
+Decisions worth recording:
+
+* **The APK is verified, not trusted.**  The recompilation works on the shipped instructions at
+  their shipped addresses, so a different build of the game is a different port.  The SHA-256 is
+  checked and a mismatch is a hard error with an explanation, not a warning.
+* **The data is linked, not copied.**  A directory junction on Windows, a symlink elsewhere;
+  the copy is only the fallback.  775 MB should not move because someone changed a setting.
+* **The heavy steps are cached.**  The P-code dump is reused when it is newer than the library,
+  the generated chunks when they are there, the objects when their sources have not changed.
+  `--force` redoes everything.
+
+### `tools/dump_pcode.py`
+
+The old `tools/dump_pcode.sh` was bash-only and hard-coded `/opt/tools/ghidra`.  The new one is
+cross-platform:
+
+* finds Ghidra on `PATH`, in `GHIDRA_INSTALL_DIR`, in the usual install locations, **or inside
+  WSL** (the paths are translated to `/mnt/c/...` and the analyser is run through `wsl.exe`);
+* does all three Ghidra steps in one go — import, dump, and **recover the functions that only
+  the data tables reach** (8 of them: a PVRTC decoder entry point and a virtual method).  The
+  recovery needs the project the import created, which is why they are in one script now; the
+  old flow lost the project between the two steps.
+* the project is kept (it is 146 MB and the recovery step needs it).
+
+Verified: a fresh dump through WSL produced the same 20 634 functions as the cached one (the
+order differs; the emitter de-duplicates) and recovered all 8 table-only functions.
+
+### The binary was 407 MB
+
+The build passed `-g` to every compile and to the link, so the executable carried the debug
+info for 20 000 translated functions.  A release build now leaves it out: **50 MB instead of
+407 MB**, and the link is much faster.  `--debug` puts it back for debugging the port.
+The release build is **pixel-identical** to the debug build (mean absolute difference 0.000000).
+
+### What an end user still needs
+
+The APK, the ~775 MB data tree (copied off a device, or the expansion the game downloads), a
+Python, MinGW-w64 GCC and Ghidra.  `SETUP.md` says where each of those comes from and how long
+the first build takes.
+
 ## 2026-11-12 — QoF: the 2D layer is correct at 1080p (current)
 
 ### What was wrong

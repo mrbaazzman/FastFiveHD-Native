@@ -333,13 +333,17 @@ int main(void) {{
               f"({changed} file(s) changed, no compile)")
         return 0
 
+    # A console program started from a windowed program opens a console window of its own
+    # unless it is told not to.
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
     def compile_one(path: Path):
         obj = path.with_suffix(".o")
         opt = "-O0" if path.name == "table.c" else "-O1"
         proc = subprocess.run(
             ["gcc", "-std=c11", opt, "-Wall", "-Wextra",
              "-I", str(ROOT / "runtime"), "-c", str(path), "-o", str(obj)],
-            capture_output=True, text=True)
+            capture_output=True, text=True, creationflags=no_window)
         return path, proc.returncode, proc.stderr
 
     sources = chunks + [out / "table.c", main_path]
@@ -372,7 +376,7 @@ int main(void) {{
     make_guest_image()
     objs = [str(p.with_suffix(".o")) for p in sources] + runtime_objs
     link = subprocess.run(["gcc", *objs, "-o", str(exe), "-lm", "-rdynamic"],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, creationflags=NO_WINDOW)
     if link.returncode != 0:
         print("LINK FAILED")
         print(link.stderr[:4000])

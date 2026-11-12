@@ -205,12 +205,31 @@ static LRESULT CALLBACK platform_wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 
 static HMODULE load_angle(void) {
+    /*
+     * Find a GLES2 backend.  The port talks to a real EGL/GLES2 implementation; ANGLE
+     * (Google's GL ES 2.0 over Direct3D 11) is the one this project was developed against,
+     * and every current Chromium build ships it.
+     *
+     * The search is: next to the executable, the tree's own third_party/angle, then the
+     * usual places a Chromium-based browser keeps its ANGLE DLLs.
+     */
+    const char *env = getenv("FAST5_ANGLE_DIR");
     const char *dirs[] = {
         "third_party\\angle",
         ".",
+        env,
+        "C:\\Program Files\\Google\\Chrome\\Application",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application",
+        "C:\\Program Files\\Microsoft\\Edge\\Application",
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application",
+        "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application",
+        "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application",
+        "C:\\Program Files\\Microsoft\\EdgeDev",
         "C:\\Users\\Baz\\AppData\\Local\\Programs\\Command Code",
     };
+    /* Chromium keeps the DLLs in a versioned subdirectory; find it if the flat one is absent. */
     for (unsigned i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+        if (!dirs[i]) continue;
         char path[512];
         snprintf(path, sizeof path, "%s\\libEGL.dll", dirs[i]);
         SetDllDirectoryA(dirs[i]);
@@ -220,6 +239,26 @@ static HMODULE load_angle(void) {
             return m;
         }
     }
+    /* Try the versioned directories of a Chromium install. */
+    for (unsigned i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+        if (!dirs[i]) continue;
+        char base[512];
+        snprintf(base, sizeof base, "%s", dirs[i]);
+        for (int v = 0; v < 200; v++) {
+            char path[600];
+            snprintf(path, sizeof path, "%s\\%d.0.0.0\\libEGL.dll", base, v);
+            if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) continue;
+            SetDllDirectoryA(path);
+            HMODULE m = LoadLibraryA(path);
+            if (m) {
+                fprintf(stderr, "platform: ANGLE loaded from %s\n", path);
+                return m;
+            }
+        }
+    }
+    fprintf(stderr, "platform: no GLES2 backend (libEGL.dll) found.\n");
+    fprintf(stderr, "platform: install ANGLE, or drop libEGL.dll and libGLESv2.dll into\n");
+    fprintf(stderr, "platform: third_party/angle/ - see third_party/angle/README.md.\n");
     return NULL;
 }
 

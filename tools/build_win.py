@@ -2,9 +2,16 @@
 """Incremental native Windows build: compile only changed chunks/runtime files with MinGW."""
 import argparse
 import os
+import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hostinfo  # noqa: E402
+import prereq  # noqa: E402
+from pyrun import NO_WINDOW  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "build" / "win"
@@ -37,6 +44,10 @@ HEADERS = [
 ]
 
 
+# Debug info makes the executable about eight times larger; a release build leaves it out.
+DEBUG = False
+
+
 def object_for(src: Path) -> Path:
     return OUT / (src.stem + ".o")
 
@@ -59,21 +70,48 @@ def stale(src: Path, obj: Path) -> bool:
     return False
 
 
+def compiler() -> str:
+    """The C compiler: the one on PATH, or the one the builder fetched."""
+    if os.environ.get("CC"):
+        return os.environ["CC"]
+    found = shutil.which("gcc")
+    if found:
+        return found
+    fetched = prereq.find_fetched("mingw")
+    if fetched:
+        for name in ("gcc.exe", "gcc"):
+            candidate = fetched / "bin" / name
+            if candidate.exists():
+                return str(candidate)
+    return "gcc"
+
+
 def compile_one(src: Path):
     obj = object_for(src)
     # Generated chunks are the hot path (scene build, per-frame update): optimise them fully.
     opt = "-O2"
-    cmd = ["gcc", "-std=c11", opt, "-g", "-Wall", "-Wextra",
+    cmd = [compiler(), "-std=c11", opt, "-Wall", "-Wextra",
            "-I", str(ROOT / "runtime"), "-c", str(src), "-o", str(obj)]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    if DEBUG:
+        cmd.insert(4, "-g")
+    p = subprocess.run(cmd, capture_output=True, text=True,
+                       creationflags=NO_WINDOW)
     return src, p.returncode, p.stderr, p.stdout
 
 
 def main() -> int:
+    global DEBUG
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true", help="recompile and relink everything")
-    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 8)
+    ap.add_argument("--jobs", type=int, default=0,
+                    help="parallel compile jobs (default: as many as the free memory allows)")
+    ap.add_argument("--debug", action="store_true",
+                    help="build with debug info (the binary is ~8x larger)")
     args = ap.parse_args()
+    DEBUG = args.debug
+    if not args.jobs:
+        args.jobs = hostinfo.jobs()
+        print(f"host: {hostinfo.describe()}")
 
     dirty = [src for src in SOURCES if args.force or stale(src, object_for(src))]
     if dirty:
@@ -105,9 +143,12 @@ def main() -> int:
         return 0
 
     print(f"linking {EXE.name}")
-    link = subprocess.run(["gcc", *(str(obj) for obj in objects), "-g",
-                           "-o", str(EXE), "-lm", "-lgdi32", "-luser32", "-lwinmm"],
-                          capture_output=True, text=True)
+    link_cmd = [compiler(), *(str(obj) for obj in objects),
+                "-o", str(EXE), "-lm", "-lgdi32", "-luser32", "-lwinmm"]
+    if DEBUG:
+        link_cmd.insert(1, "-g")
+    link = subprocess.run(link_cmd, capture_output=True, text=True,
+                          creationflags=NO_WINDOW)
     if link.returncode != 0:
         print("LINK FAILED")
         if "Permission denied" in link.stderr or "cannot open output file" in link.stderr:

@@ -15,8 +15,6 @@ import subprocess
 import sys
 import time
 
-from PIL import Image
-
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -40,8 +38,10 @@ def main() -> int:
         name, _, value = item.partition("=")
         env[name] = value
 
+    os.makedirs("build", exist_ok=True)
     before = set(glob.glob("build/game_frame_*.bmp"))
-    proc = subprocess.Popen(["build/fast5_win.exe"], env=env)
+    proc = subprocess.Popen(["build/fast5_win.exe"], env=env,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
     deadline = time.time() + args.seconds
     try:
         while time.time() < deadline and proc.poll() is None:
@@ -59,6 +59,7 @@ def main() -> int:
     new = sorted(set(glob.glob("build/game_frame_*.bmp")) - before,
                  key=lambda p: os.path.getmtime(p))
     if args.png:
+        from PIL import Image
         for path in new:
             out = path[:-4] + ".png"
             try:

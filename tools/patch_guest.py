@@ -28,7 +28,9 @@ def main() -> int:
         if name in SYMBOLS:
             struct.pack_into("<I", img.mem, off, SYMBOLS[name])
             patched += 1
-    (ROOT / "build/guest.bin").write_bytes(bytes(img.mem))
+    out = ROOT / "build/guest.bin"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(bytes(img.mem))
     print(f"patched {patched} data symbol slot(s)")
     return 0
 

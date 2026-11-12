@@ -1,207 +1,247 @@
-# SETUP — building the port from scratch
+# SETUP — building the port from your own copy of the game
 
-This walks through a clean checkout to a running game. It assumes you own a copy of *Fast Five
-HD*; the game files are **not** in this repository and cannot be redistributed with it — see
-[`NOTICE.md`](NOTICE.md).
+## The short version
 
-Total time: a few minutes of unpacking, a few minutes for the P-code dump, and a few minutes for
-the compile.
+Download **`FastFivePortBuilder.exe`** (from the project's releases), run it, point it at your
+APK and your game data folder, and press **Build the port**.  It needs no Python: everything it
+uses is inside the executable.
+
+If you would rather work from a checkout, the same pipeline is one command:
+
+```bash
+python tools/bootstrap.py --apk "00742-Fast-5-HD-1.0.9-PowerVR.apk" \
+                          --data  "D:/FastFiveHD/GloftF5HP"
+```
+
+Either way you end up with a native `fast5_win.exe`.
+
+The game is **not** in this repository and is never downloaded by the build: you supply your own
+copy, and the build reads it in place.  See [`NOTICE.md`](NOTICE.md) for the legal position.
 
 ---
 
-## 0. Prerequisites
+## 1. The builder
 
-| Tool | Why | Notes |
+### Three ways to run it
+
+| | |
+|---|---|
+| **Double-click it** | a window: pick the APK, the game data and where to install, press **Install the game**.  A progress bar shows the steps; the details are below it. |
+| **From a terminal** | `FastFivePortBuilder.exe --apk <the APK> --data <the data> --install <the folder>` |
+| **Silently** | `FastFivePortBuilder.exe /S --apk <the APK> --data <the data> --install <the folder>` - no window, no output, and the exit code says whether it worked.  The log is in `%LOCALAPPDATA%\FastFivePortBuilder\silent.log`.  This is the mode for unattended deployments. |
+
+`FastFivePortBuilder.exe` is the whole Python side of the build in one file: the bootstrap
+pipeline, the Ghidra dumper, the recompiler and the native build script.  It unpacks itself
+into
+
+```
+%LOCALAPPDATA%/FastFivePortBuilder/
+    app/       the toolchain
+    build/     the native binary, the captures, the writable game data
+    analysis/  the extracted library, the P-code, the Ghidra project
+```
+
+and works there, so nothing is written outside that folder (except the game data, which is
+only ever read).
+
+Two things it cannot bundle, because they are not ours and they are large:
+
+* **Ghidra** — the analysis of the library.
+* **a C compiler** — MinGW-w64 GCC.
+
+The builder finds both and tells you exactly what to install when they are missing.
+
+To build the builder yourself (it needs PyInstaller):
+
+```bash
+python -m pip install pyinstaller
+python tools/build_builder.py       # -> dist/FastFivePortBuilder.exe
+```
+
+## 2. What you need
+
+**The end user needs two things: the APK and the game data.**  Everything else — the analysis
+tool, the Java runtime, the compiler — the builder fetches, installs and uses on the first run.
+
+| | |
+|---|---|
+| **The APK** | `Fast Five HD 1.0.9`, the PowerVR build (`lib/armeabi-v7a/libFast5.so`). The build verifies its SHA-256, because the recompilation works on the shipped instructions at their shipped addresses — a different build is a different port. |
+| **The game data** | the ~775 MB data tree the game downloads on its first run. On a device it is at `/sdcard/gameloft/games/GloftF5HP/`. Copy it off the device, or take it from the expansion the game downloads (`res/raw/data.txt` in the APK records the URL). |
+| **An internet connection** | only for the first run, and only for what the machine does not already have. |
+
+### What the builder installs for you
+
+If they are missing, the builder downloads the official package, checks its SHA-256 and unpacks
+it into `%LOCALAPPDATA%\FastFivePortBuilder\tools\`:
+
+| Tool | Why | Size |
 |---|---|---|
-| Python 3.9+ | the toolchain | no third-party Python packages are needed |
-| MinGW-w64 GCC (x86-64) | the host compiler | `gcc` on PATH; the build script finds it |
-| Ghidra 12+ | the P-code dump | used **offline only**, never shipped |
-| Git | obviously | — |
-| A copy of the game | the input | see step 1 |
+| **Ghidra 12.1.4** | the analysis of the library (the recompiler reads Ghidra's P-code, so the project never contains an ARM decoder) | 543 MB |
+| **Eclipse Temurin JDK 21** | Ghidra runs on it | 196 MB |
+| **MinGW-w64 GCC 16.2** | the compiler for the native build | 263 MB |
 
-The native build also needs a **GLES2 backend**.  The port uses ANGLE (Google's GL ES 2.0 →
-Direct3D 11 translation layer) and loads `libEGL.dll` / `libGLESv2.dll` at start-up.  Any
-GLES2-capable `libEGL.dll` works; ANGLE is the one this project was developed against
-(`third_party/angle/README.md` explains where to get it).  Without one, the port will start and
-then fail to create a context.
+Anything you already have is used instead and never downloaded: a Ghidra on `PATH`, in
+`GHIDRA_INSTALL_DIR` or inside WSL; a JDK 21+ (the version is checked - Ghidra 12 will not run
+on 17); a `gcc` on `PATH`.  `FAST5_PREREQ_DIR` chooses where the fetched tools live, and
+`--no-download` turns the fetching off (the builder then only reports what is missing).
 
----
+A **GLES2 backend** is also needed at run time (the port talks to a real EGL/GLES2
+implementation).  **ANGLE** — Google's GL ES 2.0 over Direct3D 11 — is the one this project was
+developed against, and every current Chromium-based browser ships it: the port looks in
+`third_party/angle/` and in the usual browser install directories.  See
+`third_party/angle/README.md`.
 
-## 1. Supply the game
+**Time and disk:** the first build analyses the library in Ghidra and then compiles ~20 000
+translated functions.  Measured on a 12-core Windows machine:
 
-You need two things.
+| Step | Time |
+|---|---|
+| Ghidra: import, analyse, dump the P-code | **4 min 05 s** |
+| Ghidra: recover the table-only functions | 18 s |
+| translate 20 041 functions to C | 1 min 11 s |
+| compile 112 objects and link the binary | 3 min 18 s |
 
-### 1a. The APK — for the native library
+So a first build is about **9 minutes** (plus the tool downloads), and it needs roughly
+**1.5 GiB** of disk for the build itself plus about **1.2 GiB** for the fetched tools (the
+Ghidra project, the P-code dump, the generated C, the object files and the binary).  Later
+builds are incremental and take seconds.
 
-The game's logic is entirely in `lib/armeabi-v7a/libFast5.so` (8 357 420 bytes,
-SHA-256 `1c8d16f572c3b504edb2084b1a7887bfe8c7659a5d67f0690e813c1e483ccb12`).  An APK is a ZIP:
+**Memory:** the build needs about **4 GiB** of RAM at its peak, and it sizes itself to the
+machine:
+
+* compiling the generated translation units is the hungry part - measured, twelve parallel
+  jobs peak at 5.0 GiB, so a job costs about half a gigabyte.  The build therefore runs
+  `min(CPUs, free memory, 8)` jobs and says so in its log; on a small machine it slows down
+  instead of swapping;
+* Ghidra's own launcher already caps the JVM heap (`MAXMEM` in `support/launch.sh`, 2 GB by
+  default), so the analysis needs about a gigabyte and the WSL virtual machine about another.
+
+`--jobs N` overrides the job count.
+
+## 3. The build
+
+Graphically: run `FastFivePortBuilder.exe`, choose the APK, the data folder and **where to
+install the game**, then press **Build the port**.  The window shows the whole pipeline as it
+runs, and a **Play** button appears when the game is installed.
+
+The result is a folder you can keep and play from:
+
+```
+<install>/
+    fast5_win.exe      the native port
+    play.bat           a launcher (starts the game in that folder)
+    GloftF5HP/res/...  the game data
+    build/userdata/    the game's writable data
+```
+
+The data is copied, never moved or modified; the port reads the shipped files in place and
+writes only into `build/userdata`.  From a command prompt:
 
 ```bash
-mkdir -p analysis/apk
-cd analysis/apk
-unzip -o "path/to/00742-Fast-5-HD-1.0.9-PowerVR.apk" 'lib/*' 'res/*'
-cd ../..
+FastFivePortBuilder.exe --apk <the APK> --data <the data> --install <the folder>
 ```
 
-Verify the library:
+From a checkout:
 
 ```bash
-sha256sum analysis/apk/lib/armeabi-v7a/libFast5.so
-# 1c8d16f572c3b504edb2084b1a7887bfe8c7659a5d67f0690e813c1e483ccb12
+python tools/bootstrap.py --apk <the APK> --data <the GloftF5HP directory>
 ```
 
-### 1b. The data tree — for the assets
+It does seven things, and you can run them one at a time if you prefer:
 
-The 3D models, textures, levels, audio and music live in a separate ~775 MB data pack that the
-game downloads on first run.  On a device it lands in:
+| Step | What it does | Tool |
+|---|---|---|
+| 1 | checks the toolchain and the free disk space | — |
+| 2 | extracts `libFast5.so` from the APK and verifies its SHA-256 | — |
+| 3 | links the game data into the tree (a link, not a 775 MB copy) | — |
+| 4 | builds the relocated guest image the port runs | `tools/patch_guest.py` |
+| 5 | analyses the library in Ghidra and dumps its P-code | `tools/dump_pcode.py` |
+| 6 | translates every function to C | `recomp/link_all.py` |
+| 7 | compiles and links `build/fast5_win.exe` | `tools/build_win.py` |
 
-```
-/sdcard/gameloft/games/GloftF5HP/res/
-```
+Useful flags:
 
-Copy that directory next to the repository, so the layout is:
+| Flag | Effect |
+|---|---|
+| `--skip-pcode` | reuse the existing P-code dump (skips Ghidra entirely) |
+| `--force` | redo everything, including the analysis |
+| `--jobs N` | compile with N workers |
+| `--ghidra <dir>` | where Ghidra is, if it is not on `PATH` |
+| `--no-run` | build only, do not smoke-test the result |
 
-```
-<checkout>/
-  GloftF5HP/
-    InsTime
-    res/
-      file000000.dat … file000651.dat   (652 payloads, 775 MB)
-      LOGO_Gameloft_480x800.mp4
-      oconf.bar
-      profile1.sav
-      tracklog.dat
-```
+After the build the script boots the game for 20 seconds as a smoke test and writes
+`build/bootstrap.log`.
 
-The port reads that tree **in place** and never writes to it.  The URL the game itself uses for
-the pack is recorded in the APK's `res/raw/data.txt`.
-
-> `file000000.dat` is the **obfuscation map**: it maps the payload names back to their original
-> asset names.  The port uses the game's own decoder, so it does not need to be decoded by hand.
-
----
-
-## 2. Build the guest image
-
-The port does not read the `.so` at run time — it reads a **relocated guest image**, prepared
-offline: the ELF's two load segments are mapped at their link addresses and all 62 432
-relocations are applied, so the game's absolute pointers, vtables and RTTI stay valid without
-any fixups.
+## 4. Playing
 
 ```bash
-python tools/patch_guest.py
-```
-
-This writes `build/guest.bin` (about 9 MB).  It also points the three libc **data** symbols the
-library imports (`_ctype_`, `_tolower_tab_`, `_toupper_tab_`) at the tables the runtime provides
-— the shipped library imports them as `R_ARM_GLOB_DAT`, which a host libc cannot satisfy.
-
----
-
-## 3. Dump the P-code
-
-The recompiler does not read machine code directly — it reads Ghidra's P-code, which is the
-decoder's own output.  That way we never have to write an ARM decoder.
-
-```bash
-bash tools/dump_pcode.sh
-```
-
-This runs headless Ghidra over the library and writes `analysis/reports/pcode.tsv`
-(20 627 functions, ~223 MB).  Edit `GHIDRA=` at the top of `dump_pcode.sh` if Ghidra is not at
-`/opt/tools/ghidra`.
-
-If you already have a Ghidra project, `bash tools/dump_pcode.sh 128 reuse` re-runs the script on
-it without re-analysing.
-
----
-
-## 4. Emit the C translation units
-
-```bash
-python recomp/link_all.py analysis/reports/pcode.tsv --emit-only
-```
-
-This writes `build/link/chunk_000.c … chunk_101.c` and `build/link/table.c` — the 20 325
-translated functions and the global address → function table that makes direct and indirect calls
-resolve across the whole binary.
-
-Nothing in `build/` is committed; it is all reproducible from the two steps above.
-
----
-
-## 5. Build the native Windows binary
-
-```bash
-python tools/build_win.py
-```
-
-The script compiles the chunks and the platform layer with MinGW and links `build/fast5_win.exe`.
-It is incremental — only changed files are recompiled.  Use `--force` for a full rebuild (this
-takes a few minutes; if the link is interrupted, delete the zero-byte objects in `build/win/`
-and relink).
-
----
-
-## 6. Play
-
-```bash
-./play.bat            # normal play
-./play.bat menu       # auto-advance the title into the main menu
-./play.bat race       # auto-drive all the way into a race
+play.bat            # normal play
+play.bat menu       # auto-advance the title into the main menu
+play.bat race       # auto-drive all the way into a race
 ```
 
 The window opens at 1920×1080 (borderless if that fills the screen).  The mouse is the game's
 touch; the arrow keys steer; Enter/Space taps the screen centre.
 
-If the window is black, check the log for `platform: could not load libEGL.dll` (step 0) or for
-`GUEST FAULT` (something went wrong in the guest itself — the address and the context are in the
-log).
+| Variable | Default | Effect |
+|---|---|---|
+| `FAST5_WIDTH` / `FAST5_HEIGHT` | `1920` / `1080` | the presentation size of the window |
+| `FAST5_UI_FIT` | `fill` | `crop` fits the 2D canvas undistorted and covers the window; `letterbox` keeps the proportions and centres it |
+| `FAST5_ENGINE_RES` | `native` | `design` runs the engine at 800×480 instead of the window size |
+| `FAST5_UI_2D` | `design` | `native` lets the engine lay the 2D layer out for the window (crisp, but the game's own screens land in the corner) |
+| `FAST5_WINDOWED` | off | force a framed window instead of borderless |
+| `FAST5_FAKE_GPU` | off | report the PowerVR identity the game expects |
+| `FAST5_AUTO_MENU` / `FAST5_AUTO_RACE` | off | drive the title into the menu / into a race |
+| `FAST5_GL_TRACE` | off | log every GL call |
 
----
+The port reads the game data **in place** and never writes to it.  Its own writable data goes to
+`build/userdata/` and its derived assets to `build/overlay/`.
 
-## 7. Optional: the GLES2 backend
+## 5. Doing it by hand
 
-`third_party/angle/README.md` describes where the ANGLE binaries come from.  They are looked up
-in this order:
-
-1. `third_party/angle/` (next to the executable's working directory),
-2. `.` (the working directory),
-3. a system location.
-
----
-
-## 8. Optional: verifying the translation
-
-The differential test runs a translated function and the original ARM code under Unicorn on
-identical register and memory state, and compares the results.  It is the gate that keeps the
-translator honest:
+The same steps, individually:
 
 ```bash
-python recomp/diff_test.py analysis/reports/pcode.tsv 0x29b014
-python recomp/batch_diff.py analysis/reports/pcode.tsv --count 40
+# 1. the native library
+python -c "import zipfile; zipfile.ZipFile('game.apk').extract('lib/armeabi-v7a/libFast5.so','analysis/apk')"
+
+# 2. the game data next to the repository
+#    (a directory junction on Windows, a symlink elsewhere)
+cmd /c mklink /J GloftF5HP D:/FastFiveHD/GloftF5HP
+
+# 3. the relocated guest image
+python tools/patch_guest.py
+
+# 4. the P-code (the slow step)
+python tools/dump_pcode.py
+
+# 5. the C translation units
+python recomp/link_all.py analysis/reports/pcode_all.tsv --emit-only
+
+# 6. the native binary
+python tools/build_win.py
 ```
 
-It needs Unicorn and a copy of the library, so it is a development tool rather than part of the
-build.
+`tools/dump_pcode.py` finds Ghidra on `PATH`, in `GHIDRA_INSTALL_DIR`, in the usual install
+locations, or inside WSL.  Pass `--ghidra <dir>` if it is somewhere else.
 
----
-
-## 9. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| `platform: could not load libEGL.dll` | no GLES2 backend — see step 0 / step 6 |
-| `platform: ANGLE loaded from …` then a black window | the data tree is missing or misplaced — see step 1b |
-| `vfs: … -> MISS` for `file000123.dat` | the data tree is incomplete |
-| `GUEST FAULT` in the log | a guest-side error; the address identifies the function — see `docs/01-TARGET.md` for the address map |
-| The build fails with `file truncated` | an interrupted link: delete the zero-byte objects in `build/win/` and relink |
+| `Ghidra was not found` | install it, set `GHIDRA_INSTALL_DIR`, or pass `--ghidra <dir>` |
+| `this is not the library the port was built for` | a different APK build; the port is tied to the shipped instructions |
+| `that file is not a ZIP archive` | the APK was renamed or is not the APK |
+| `has no 'res' directory` | the data path is not the `GloftF5HP` directory (it must contain `res/`) |
+| `could not link; copying instead` | the filesystem cannot hold a link; the copy needs 775 MB |
+| `LINK FAILED … Permission denied` | the executable is still running; close it and build again |
+| `no compiler found` | MinGW-w64 GCC is not on `PATH` |
+| The game shows a black screen | the data link is missing — check `build/bootstrap.log` |
 
----
-
-## Where to look next
+## 7. Where to look next
 
 * [`docs/05-STATE.md`](docs/05-STATE.md) — the current state of the work and what is still open.
 * [`docs/04-ROADMAP.md`](docs/04-ROADMAP.md) — the milestones and their acceptance gates.
 * [`runtime/README.md`](runtime/README.md) — the platform layer, module by module.
 * [`recomp/README.md`](recomp/README.md) — the recompiler, module by module.
+* [`tools/README.md`](tools/README.md) — the scripts, and what each one proves.

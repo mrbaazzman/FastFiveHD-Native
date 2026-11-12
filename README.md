@@ -11,6 +11,27 @@ your own copy and build.
 
 ![pipeline](docs/diagrams/architecture.svg)
 
+> ### This project is very early
+>
+> It works, but it is the beginning of something, not a finished product.  The port boots,
+> plays the menus, the garage and a race at 1920×1080 — that much is real and it is tested on
+> every build.  Everything around it is rough:
+>
+> * **the port is tied to one exact build of the game.**  The recompilation works on the
+>   shipped instructions at their shipped addresses, so a different APK is a different port.
+>   The installer verifies the library's SHA-256 and refuses anything else;
+> * **there is a lot of work left**: no live window resize, the road reflection is upscaled,
+>   the 2D layer cannot be both crisp and correctly composed (see
+>   [`docs/05-STATE.md`](docs/05-STATE.md)), no sound path is finished, the multiplayer code
+>   is present but inert, and the fidelity has not been measured against a reference device;
+> * **the toolchain is the hard part.**  The end-user installer works, but the development
+>   setup still needs Python, a compiler and the analysis step;
+> * **expect things to change.**  The ports, the file names and the workflow will move around
+>   for a while yet.
+>
+> It is published so the work is visible and usable, not because it is finished.  Bug reports,
+> ideas and help are welcome.
+
 ---
 
 ## What this is
@@ -142,24 +163,30 @@ measured, how it was measured, and what is still open.
 
 ## Building
 
-You need **your own copy** of the game. See [`SETUP.md`](SETUP.md) for the full walkthrough.
+You need **your own copy** of the game — the APK and the ~775 MB data tree.
+
+**The easy way:** download **`FastFivePortBuilder.exe`** from the releases, run it, point it at
+the APK and the data folder, press **Build the port**.  It is one file and needs no Python.
+
+**From a checkout:**
 
 ```bash
-# 1. supply the game  (APK + data tree, see SETUP.md)
-# 2. build the relocated guest image from the native library
-python tools/patch_guest.py
-# 3. dump the P-code from the native library with headless Ghidra
-bash tools/dump_pcode.sh
-# 4. emit the C translation units
-python recomp/link_all.py analysis/reports/pcode_all.tsv --emit-only
-# 5. compile and link the native Windows build
-python tools/build_win.py
-# 6. play
+python tools/bootstrap.py --apk "00742-Fast-5-HD-1.0.9-PowerVR.apk" \
+                          --data  "D:/FastFiveHD/GloftF5HP"
+```
+
+That extracts the native library from the APK (and verifies it), links the game data into the
+tree, analyses the library with Ghidra, translates every function to C and compiles the result
+into `build/fast5_win.exe`.  A first build takes about **9 minutes** and 1.5 GiB of disk; later
+builds are incremental and take seconds.
+
+```bash
 ./play.bat            # or: play.bat menu   /   play.bat race
 ```
 
-Requirements: Python 3.9+, MinGW-w64 GCC (x86-64), and Ghidra for step 2.  The build is
-incremental; `--force` rebuilds everything (and takes a few minutes).
+Requirements: Python 3.9+, MinGW-w64 GCC (x86-64) and Ghidra (used offline only; a Ghidra
+inside WSL is found automatically).  [`SETUP.md`](SETUP.md) has the full walkthrough, the
+manual steps and the troubleshooting table.
 
 ## Running
 
@@ -172,6 +199,7 @@ The port reads the game data **in place** and never writes to it.  It creates it
 | `FAST5_UI_FIT` | `fill` | `crop` fits the canvas undistorted and covers the window (clipping the canvas's top and bottom); `letterbox` keeps the proportions and centres the canvas |
 | `FAST5_ENGINE_RES` | `native` | `design` runs the engine at 800×480 instead of the window size |
 | `FAST5_UI_2D` | `design` | `native` lets the engine lay the 2D layer out for the window (see below) |
+| `FAST5_AUTO_MENU` / `FAST5_AUTO_RACE` | off | drive the title into the menu / into a race |
 | `FAST5_WINDOWED` | off | force a framed window instead of borderless |
 | `FAST5_FAKE_GPU` | off | report the PowerVR identity the game expects |
 | `FAST5_AUTO_MENU` | off | drive the title screen into the main menu |

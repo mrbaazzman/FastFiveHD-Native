@@ -18,6 +18,7 @@ analysis/apk/
 # ---------------------------------------------------------------------------
 build/
 out/
+dist/
 *.exe
 *.o
 *.obj
@@ -33,14 +34,14 @@ build/link/
 recomp/generated/
 
 # Large reproducible analysis artefacts (regenerated from the library)
-analysis/reports/pcode.tsv
-analysis/reports/pcode_all.tsv
-analysis/reports/pcode_extra.tsv
+analysis/reports/pcode*
+analysis/reports/*.stamp
 analysis/reports/dat-map.raw
 analysis/reports/dat-map.tsv
 analysis/data-manifest.sha256
 
 # The Ghidra project (contains the analysed library)
+analysis/ghidra-*/
 analysis/ghidra-work/
 
 # ---------------------------------------------------------------------------
