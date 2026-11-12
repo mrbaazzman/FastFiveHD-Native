@@ -1,0 +1,28 @@
+# Normalise line endings: the repository stores LF, Windows tools get CRLF.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files — never touched by Git's text handling.
+*.apk binary
+*.so binary
+*.dex binary
+*.dat binary
+*.zip binary
+*.wav binary
+*.mp4 binary
+*.bmp binary
+*.tga binary
+*.pvr binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.o binary
+*.obj binary
+*.a binary
+*.lib binary

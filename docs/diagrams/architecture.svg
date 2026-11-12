@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520"
+     font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>Fast Five HD native port — build and run pipeline</title>
+  <desc>Offline toolchain: the user's own copy of the game is turned into portable C by the
+        recompiler; the native platform layer then runs it on desktop Windows x64.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/>
+    </marker>
+    <style>
+      .box   { fill:#ffffff; stroke:#4a5568; stroke-width:1.5; rx:6; }
+      .ours  { fill:#eef6ff; stroke:#2b6cb0; stroke-width:1.5; rx:6; }
+      .theirs{ fill:#f7fafc; stroke:#a0aec0; stroke-width:1.5; rx:6; stroke-dasharray:5 3; }
+      .h1    { font-size:15px; font-weight:600; fill:#1a202c; }
+      .h2    { font-size:12px; fill:#2d3748; }
+      .mono  { font-size:11.5px; fill:#4a5568; font-family:Consolas, Menlo, monospace; }
+      .lbl   { font-size:11.5px; fill:#4a5568; }
+      .band  { font-size:12.5px; font-weight:600; fill:#2d3748; letter-spacing:.06em; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="520" fill="#ffffff"/>
+
+  <!-- band 1: user-supplied inputs -->
+  <text class="band" x="30" y="34">1 — YOUR COPY OF THE GAME (not in this repository)</text>
+  <rect class="theirs" x="30" y="48" width="250" height="86"/>
+  <text class="h1" x="46" y="72">Fast Five HD (Android 1.0.9)</text>
+  <text class="mono" x="46" y="94">00742-…-PowerVR.apk</text>
+  <text class="mono" x="46" y="112">lib/armeabi-v7a/libFast5.so</text>
+  <text class="mono" x="46" y="128">GloftF5HP/res/  (653 .dat)</text>
+
+  <!-- band 2: the offline toolchain -->
+  <text class="band" x="30" y="176">2 — OFFLINE TOOLCHAIN (ours, offline only)</text>
+  <rect class="ours" x="30" y="190" width="250" height="86"/>
+  <text class="h1" x="46" y="214">recomp/ — static recompiler</text>
+  <text class="mono" x="46" y="236">elf_image.py   ELF + relocations</text>
+  <text class="mono" x="46" y="254">pcode.py       Ghidra P-code TSV</text>
+  <text class="mono" x="46" y="272">emit_c.py      P-code → C</text>
+
+  <rect class="ours" x="300" y="190" width="250" height="86"/>
+  <text class="h1" x="316" y="214">Ghidra (headless)</text>
+  <text class="mono" x="316" y="236">analysis/apk/…/libFast5.so</text>
+  <text class="mono" x="316" y="254">DumpPcode.java</text>
+  <text class="mono" x="316" y="272">→ analysis/reports/pcode_all.tsv</text>
+
+  <rect class="ours" x="570" y="190" width="250" height="86"/>
+  <text class="h1" x="586" y="214">Generated C</text>
+  <text class="mono" x="586" y="236">build/link/chunk_*.c</text>
+  <text class="mono" x="586" y="254">build/link/table.c</text>
+  <text class="mono" x="586" y="272">20 325 functions, 102 chunks</text>
+
+  <!-- band 3: the native build -->
+  <text class="band" x="30" y="322">3 — NATIVE BUILD (ours)</text>
+  <rect class="ours" x="30" y="336" width="250" height="98"/>
+  <text class="h1" x="46" y="360">runtime/ — Win64 platform</text>
+  <text class="mono" x="46" y="382">platform_win32.c  window + EGL</text>
+  <text class="mono" x="46" y="400">gl_win32.c        91 GLES2 imports</text>
+  <text class="mono" x="46" y="418">overrides.c       host overrides</text>
+  <text class="mono" x="46" y="428">resolution.c      presentation</text>
+
+  <rect class="ours" x="300" y="336" width="250" height="98"/>
+  <text class="h1" x="316" y="360">fast5_win.exe</text>
+  <text class="mono" x="316" y="382">gcc -O2 (MinGW-w64)</text>
+  <text class="mono" x="316" y="400">no emulator, no JIT</text>
+  <text class="mono" x="316" y="418">no Android runtime</text>
+
+  <rect class="box" x="570" y="336" width="250" height="98"/>
+  <text class="h1" x="586" y="360">The game, at 1920×1080</text>
+  <text class="mono" x="586" y="382">GLES 3.0 / D3D 11 via ANGLE</text>
+  <text class="mono" x="586" y="400">menu · garage · race</text>
+  <text class="mono" x="586" y="418">mouse = touch</text>
+
+  <!-- arrows -->
+  <line x1="155" y1="134" x2="155" y2="186" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="155" y1="276" x2="155" y2="332" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="280" y1="233" x2="296" y2="233" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="550" y1="233" x2="566" y2="233" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="695" y1="276" x2="695" y2="332" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="280" y1="385" x2="296" y2="385" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="550" y1="385" x2="566" y2="385" stroke="#4a5568" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- feedback loop: the game data is read, never written -->
+  <path d="M 695 434 L 695 470 L 155 470 L 155 140" fill="none" stroke="#718096"
+        stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <text class="lbl" x="330" y="489">game data is read in place, never modified</text>
+
+  <text class="lbl" x="30" y="509">Solid blue = this repository.   Dashed grey = the publisher's files, supplied by you.</text>
+</svg>
