@@ -91,7 +91,7 @@ comparison; the port keeps the guest's 800×480 canvas and converts it itself.
 * In `FAST5_ENGINE_RES=design` the road reflection and the post-effect buffers stay design
   sized and are upscaled.
 
-## 2026-11-11 — Full HD: the game presents correctly at 1920×1080 (current)
+## 2026-11-11 — Full HD: the game presents correctly at 1920×1080
 
 ### The rule
 
