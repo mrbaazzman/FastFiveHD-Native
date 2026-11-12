@@ -139,7 +139,7 @@ is missing `mm_*PVRTC2.tga` scene names / black-white car bands; see `docs/05-ST
 **[x] Met** — see `docs/05-STATE.md` → "Game cycle — what it took". Audio, progress and cash all
 survive a restart with 0 guest faults.
 
-## M6.5 — Presentation (Full HD) ✅ 2026-11-11
+## M6.5 — Presentation (Full HD) ✅ 2026-11-11, corrected 2026-11-12
 
 The port presents the game in a window of any size. The engine runs at the window size (native
 device, render targets, camera aspect, scene); the 2D layout keeps the authored 800×480 space
@@ -151,9 +151,12 @@ so the game logic, the hit rectangles and the 3D picking stay 1:1 with the refer
    transform is shared with the pointer and the 3D picking.
 3. **[x]** 3D scene rendered at the window resolution with the window's aspect ratio.
 4. **[x]** Render targets at the window resolution (2304×1296 instead of 960×576).
-5. **[x]** `FAST5_UI_FIT=letterbox` variant that scales the 2D layer uniformly instead of
-   stretching it; `FAST5_ENGINE_RES=design` keeps the engine at 800×480.
-6. **[ ]** Live window resize (the EGL surface is created once at start-up).
+5. **[x]** One uniform scale for the 2D layer (the default), so the artwork and the bitmap font
+   keep the reference proportions at any window size; `FAST5_UI_FIT=fill` stretches each axis
+   instead; `FAST5_ENGINE_RES=design` keeps the engine at 800×480.
+6. **[x]** A start-up invariant check: the 2D canvas must land inside the framebuffer and the
+   frame → design → frame round trip must be the identity.
+7. **[ ]** Live window resize (the EGL surface is created once at start-up).
 
 ## M7 — 1:1 validation
 

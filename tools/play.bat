@@ -16,7 +16,9 @@ cd /d "%~dp0.."
 rem  The window is 1920x1080 by default (borderless when that fills the screen).
 rem  Set FAST5_WIDTH / FAST5_HEIGHT for another presentation size, e.g.
 rem      set FAST5_WIDTH=1280 & set FAST5_HEIGHT=720
-rem  Set FAST5_UI_FIT=letterbox for an undistorted (uniformly scaled) 2D layer.
+rem  The 2D layer is fitted with one uniform scale and centred, so the artwork and the
+rem  text keep their proportions exactly.  Set FAST5_UI_FIT=fill to stretch each axis
+rem  instead, so the 2D covers the whole window (6.7 %% distortion at 1920x1080).
 set FAST5_FAKE_GPU=1
 set FAST5_LOG=build\fast5.log
 set FAST5_AUTO_MENU=
@@ -39,7 +41,8 @@ echo   Enter / Space      = touch at screen centre
 echo   Alt+F4             = exit
 echo.
 echo Resolution: the game runs at its own 800x480 layout and is presented in the
-echo window (1920x1080 by default). Set FAST5_WIDTH / FAST5_HEIGHT to change it.
+echo window (1920x1080 by default), scaled uniformly so nothing is distorted.
+echo Set FAST5_WIDTH / FAST5_HEIGHT to change it.
 echo.
 echo Close the game window when finished.
 echo.

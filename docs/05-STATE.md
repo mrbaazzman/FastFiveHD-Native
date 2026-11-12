@@ -23,6 +23,74 @@ documentation — and nothing that is derived from the shipped game.
 the published tree was built, linked and run against the game, and the resulting frames are
 **pixel-identical** to this working tree (mean absolute difference 0.0000 over frames 30/120/240).
 
+## 2026-11-12 — QoF: the 2D layer is correct at 1080p (current)
+
+### What was wrong
+
+The 2D layer was *placed* correctly but it was **stretched**: the canvas is 5:3 (800×480) and
+the window is 16:9, and the host scaled each axis separately (2.4× / 2.25×) so the canvas
+covered the window.  Everything was 6.7 % wider than it should be — the artwork, the bitmap
+font, the licence text.
+
+### The real cause
+
+The `draw2DRectangle` override computed its own per-axis factor
+(`frame/design` on each axis) instead of using the shared transform, so `FAST5_UI_FIT` had no
+effect at all: `letterbox` and `fill` produced **byte-identical** frames.  The fit mode was
+documented and implemented in `resolution.c`, and then bypassed at the one place it mattered.
+
+The fix routes the 2D draws through `fast5_resolution_fit_rect()`, the same transform the
+pointer and the 3D pick already use.
+
+Measured, on the licence text (the reference render against the 1080p render):
+
+| Fit | Width / height | Distortion vs the reference |
+|---|---|---|
+| `fill` (before) | 11.400 | **+5.3 %** (stretched) |
+| `letterbox` (now the default) | 10.692 | −1.2 % (pixel quantisation; the uniform 2.25× expects 10.824) |
+
+### The other half: the engine's own resolution independence
+
+`Application::Init` computes an *application scale* (`this+600`): `2.0` if `SCR_WIDTH > 480`,
+else `1.0`, and a logical size of `screen/scale`.  That looks like a resolution-independence
+mechanism, and the HUD does use it (`HudManager::InitButtons` anchors every element to
+`SCR_WIDTH`/`SCR_HEIGHT`).
+
+It is not one, though — measured:
+
+* `notifyTouchPress` divides the incoming touch by the scale, so the guest expects the touch
+  in *screen* space.
+* `CSprite::GetScaleFactor` returns the scale for sprites with `m_bPositionScale` set, so it
+  scales **positions**, not the artwork.
+* `CFont::DrawString` places the glyphs at a scaled position but draws them at their
+  **authored pixel size** — the bitmap font never grows.
+
+So the 2D *screens* (the Universal logo, the loading widgets) stay where they were authored
+for the 400×240 logical space.  Letting the engine lay them out for the window
+(`FAST5_UI_2D=native`) puts the logo in the **top-left corner** — exactly what the shipped game
+does on a large screen, and not what a 1080p presentation wants.  That mode is kept for
+comparison; the port keeps the guest's 800×480 canvas and converts it itself.
+
+### The result
+
+* One transform (`runtime/resolution.c`) for the 2D draws, the 2D clip, the pointer and the 3D
+  pick — they cannot drift apart.
+* One uniform scale by default: the 2D keeps the reference proportions exactly, at any window
+  size.  That is the *global resolution changer*: change `FAST5_WIDTH`/`FAST5_HEIGHT` and the
+  whole layer follows.
+* A start-up invariant check (`resolution: invariant …`) proves the canvas lands inside the
+  framebuffer and that the frame → design → frame round trip is the identity.
+* The 2D canvas is *not* stretched, and nothing is clipped: the 3D scene fills the window and
+  the 2D layer is centred on it (60 px free on each side at 1920×1080, 3 %).
+
+### Still open
+
+* Live window resize (the EGL surface is created once at start-up).
+* The artwork is authored at 800×480, so at 1080p it is magnified 2.25×.  The game ships no
+  1080p 2D art — the `*_highres` sprites are 2× the 400×240 design, i.e. exactly 800×480.
+* In `FAST5_ENGINE_RES=design` the road reflection and the post-effect buffers stay design
+  sized and are upscaled.
+
 ## 2026-11-11 — Full HD: the game presents correctly at 1920×1080 (current)
 
 ### The rule

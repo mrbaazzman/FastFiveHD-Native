@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
 
 #include "cpu.h"
@@ -76,6 +77,10 @@ static HANDLE g_game_thread;
  * authoritative source.  ELF 0x7f8758 (`_ZN11Application11s_pInstanceE`).
  */
 #define APPLICATION_INSTANCE_ADDR 0x7f8758u
+
+/* DIAGNOSTIC switches (temporary). */
+static int g_ui_diag = -1;
+extern int g_ui_native_2d;
 
 /* 1 when the engine itself runs at the window size (native render targets). */
 int g_engine_native = 1;
@@ -415,13 +420,64 @@ int main(void) {
      * design resolution instead.
      */
     {
+        if (g_ui_diag < 0) g_ui_diag = getenv("FAST5_UI_DIAG") != NULL;
+        /*
+         * How the 2D layer reaches the window.
+         *
+         * design (the default): the guest keeps its 800x480 canvas — exactly as the reference
+         *   device has it — and the host converts it to the window with the one shared
+         *   transform.  The game's 2D screens are authored for that canvas and do not
+         *   re-centre, so this is the only way they land where they should.
+         *
+         * native: the guest is told the real screen size, so the engine lays the 2D layer out
+         *   for it itself (the HUD follows the screen).  The 2D *screens* still stay where they
+         *   were authored, so on a large screen the Universal logo ends up in the corner.
+         *   Kept for comparison; see docs/05-STATE.md.
+         */
+        const char *ui = getenv("FAST5_UI_2D");
+        g_ui_native_2d = (ui && !strcmp(ui, "native")) ? 1 : 0;
         const char *fit = getenv("FAST5_UI_FIT");
-        int fill = !(fit && !strcmp(fit, "letterbox"));
+        /*
+         * Uniform scaling is the default: the 2D canvas is 5:3 and the framebuffer usually
+         * is not, so stretching each axis would distort the artwork and the text.  With one
+         * uniform scale the 2D layer keeps the reference proportions exactly, and the 3D
+         * scene fills the rest of the frame.
+         */
+        int fill = (fit && !strcmp(fit, "fill")) ? 1 : 0;
         const char *mode = getenv("FAST5_ENGINE_RES");
         int native = (mode && !strcmp(mode, "design")) ? 0 : 1;
         g_engine_native = native;
-        fast5_resolution_setup(DESIGN_WIDTH, DESIGN_HEIGHT,
-                                platform_width(), platform_height(), fill, native);
+        int dw = g_ui_native_2d ? platform_width() : DESIGN_WIDTH;
+        int dh = g_ui_native_2d ? platform_height() : DESIGN_HEIGHT;
+        platform_set_design_size(dw, dh);
+        fast5_resolution_setup(dw, dh, platform_width(), platform_height(),
+                                fill, native, g_ui_native_2d);
+        /*
+         * Invariant check for the presentation transform: the design canvas must land inside
+         * the framebuffer, and the round trip (frame -> design -> frame) must be the identity.
+         * The 2D draws, the pointer and the 3D picking all use this one transform, so if it is
+         * broken the whole layer moves together — which is exactly what must not happen.
+         */
+        {
+            double fx, fy, dx, dy, x0, y0, x1, y1;
+            fast5_resolution_to_frame(0.0, 0.0, &x0, &y0);
+            fast5_resolution_to_frame((double)dw, (double)dh, &x1, &y1);
+            int inside = x0 >= -0.5 && y0 >= -0.5 &&
+                         x1 <= (double)platform_width() + 0.5 &&
+                         y1 <= (double)platform_height() + 0.5;
+            fast5_resolution_to_frame(0.0, 0.0, &fx, &fy);
+            fast5_resolution_to_design(fx, fy, &dx, &dy);
+            double back_x = 0.0, back_y = 0.0;
+            fast5_resolution_to_frame(dx, dy, &back_x, &back_y);
+            int roundtrip = fabs(back_x - fx) < 0.01 && fabs(back_y - fy) < 0.01;
+            fprintf(stderr,
+                    "resolution: invariant %s%s (canvas %dx%d -> %.1f,%.1f .. %.1f,%.1f "
+                    "in a %dx%d frame)\n",
+                    inside ? "inside" : "OUTSIDE",
+                    roundtrip ? "" : " ROUND-TRIP BROKEN",
+                    dw, dh, x0, y0, x1, y1,
+                    platform_width(), platform_height());
+        }
     }
     if (!gl_bridge_init()) {
         fprintf(stderr, "GL bridge init failed\n");
@@ -474,7 +530,7 @@ int main(void) {
      * the game reads for 2D layout are converted back to it. The device, its render targets
      * and the camera keep the window size.
      */
-    if (g_engine_native) {
+    if (g_engine_native && !g_ui_native_2d) {
         int32_t dw = DESIGN_WIDTH, dh = DESIGN_HEIGHT;
         int32_t lw = DESIGN_WIDTH / 2, lh = DESIGN_HEIGHT / 2;
         uint32_t app = *(uint32_t *)(g_mem + APPLICATION_INSTANCE_ADDR);
@@ -738,11 +794,29 @@ int main(void) {
          */
         if (g_engine_native) {
             uint32_t app = *(uint32_t *)(g_mem + APPLICATION_INSTANCE_ADDR);
-            *(int32_t *)(g_mem + SCR_WIDTH_ADDR) = DESIGN_WIDTH;
-            *(int32_t *)(g_mem + SCR_HEIGHT_ADDR) = DESIGN_HEIGHT;
-            if (app && app + 0x258u < guest_mem_size) {
-                *(int32_t *)(g_mem + app + 0x250u) = DESIGN_WIDTH / 2;
-                *(int32_t *)(g_mem + app + 0x254u) = DESIGN_HEIGHT / 2;
+            if (!g_ui_native_2d) {
+                *(int32_t *)(g_mem + SCR_WIDTH_ADDR) = DESIGN_WIDTH;
+                *(int32_t *)(g_mem + SCR_HEIGHT_ADDR) = DESIGN_HEIGHT;
+                if (app && app + 0x258u < guest_mem_size) {
+                    *(int32_t *)(g_mem + app + 0x250u) = DESIGN_WIDTH / 2;
+                    *(int32_t *)(g_mem + app + 0x254u) = DESIGN_HEIGHT / 2;
+                }
+            }
+            /* DIAGNOSTIC: what does the engine think its 2D scale and logical size are? */
+            if (g_ui_diag && (frames % 60 == 0)) {
+                float sc = 0.0f;
+                if (app && app + 0x25cu < guest_mem_size) {
+                    memcpy(&sc, (const void *)(g_mem + app + 0x258u), 4);
+                }
+                fprintf(stderr, "[f%u] SCR=%dx%d logical=%dx%d scale=%.4f app=0x%08x\n",
+                        frames,
+                        *(int32_t *)(g_mem + SCR_WIDTH_ADDR),
+                        *(int32_t *)(g_mem + SCR_HEIGHT_ADDR),
+                        app && app + 0x258u < guest_mem_size
+                            ? *(int32_t *)(g_mem + app + 0x250u) : -1,
+                        app && app + 0x258u < guest_mem_size
+                            ? *(int32_t *)(g_mem + app + 0x254u) : -1,
+                        (double)sc, app);
             }
         }
         g_render_active = 1;

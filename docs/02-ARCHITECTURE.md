@@ -148,6 +148,19 @@ return -1;
 2. `nativePutDeviceToSleep()`.
 3. Scale factor: `2.0` if `SCR_WIDTH > 480`, else `1.0`; stored at `this+600`.
    `this+0x254 = height/scale`, `this+0x250 = width/scale`.
+
+   > **What the scale factor is, and is not.**  `this+600` (0x258) is the *application scale*.
+   > `notifyTouchPress` divides the incoming touch by it, and `CSprite::GetScaleFactor` returns
+   > it for sprites whose `m_bPositionScale` flag is set — so it scales **positions**, not the
+   > artwork.  The bitmap font does not use it at all: `CFont::DrawString` places the glyphs at
+   > a scaled position but at their authored pixel size.
+   >
+   > The consequence: the 2D layer is **not** resolution-independent.  The HUD anchors itself to
+   > `SCR_WIDTH`/`SCR_HEIGHT` (so it follows the screen), but the 2D *screens* — the Universal
+   > logo, the loading widgets — are positioned for the reference canvas and do not re-centre.
+   > Measured: at a 1920×1080 screen size the logo lands in the top-left corner, because its
+   > position is authored for the 400×240 logical space.  The port therefore keeps the guest's
+   > 800×480 canvas and converts it to the window itself (see `docs/05-STATE.md`).
 4. `Game::NATIVE_SCREEN_HEIGHT/ WIDTH = h / w`.
 5. `Game::CreateGame()`.
 6. `glitch::core::setProcessBufferHeapSize(0x80000)` (512 KiB).

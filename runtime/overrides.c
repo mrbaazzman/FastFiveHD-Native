@@ -43,6 +43,12 @@ uint32_t g_application_ptr;
 
 #define APPLICATION_INSTANCE_ADDR 0x7f8758u
 
+/*
+ * 1 = let the engine keep its own 2D logical size and screen-size globals
+ * (diagnostic switch: shows what the engine does on its own).
+ */
+int g_ui_native_2d;
+
 static uint32_t live_application(const uint8_t *mem) {
     uint32_t app = *(const uint32_t *)(mem + APPLICATION_INSTANCE_ADDR);
     if (app && app + 0x258u < guest_mem_size) return app;
@@ -1921,7 +1927,7 @@ int call_override(Cpu *c, uint8_t *mem, uint32_t target) {
         fn_29d504(c, mem);
         uint32_t app = live_application(mem);
         g_application_ptr = app;
-        if (g_engine_native) {
+        if (g_engine_native && !g_ui_native_2d) {
             *(int32_t *)(mem + 0x7d7820u) = 800;
             *(int32_t *)(mem + 0x7d7824u) = 480;
             if (app) {
@@ -1948,7 +1954,7 @@ int call_override(Cpu *c, uint8_t *mem, uint32_t target) {
          */
         uint32_t app = live_application(mem);
         g_application_ptr = app;
-        if (g_engine_native) {
+        if (g_engine_native && !g_ui_native_2d) {
             *(int32_t *)(mem + 0x7d7820u) = 800;   /* SCR_WIDTH  */
             *(int32_t *)(mem + 0x7d7824u) = 480;   /* SCR_HEIGHT */
             if (app) {
@@ -2044,77 +2050,52 @@ int call_override(Cpu *c, uint8_t *mem, uint32_t target) {
         static int res_trace_draw = -1;
         if (res_trace_draw < 0) res_trace_draw = getenv("FAST5_RES_TRACE") != NULL;
         /*
-         * Every 2D draw is authored in the game's design space (800x480). The destination
-         * rect is scaled to whatever the draw ends up in: the window for the screen pass,
-         * the render target's own size for an off-screen pass (the menu renders its 2D
-         * screens into a texture and maps that texture onto 3D quads, so the content has
-         * to fill the target).
+         * Every 2D draw is authored in the game's design space (800x480).  The screen pass is
+         * converted to the window with the one shared transform (runtime/resolution.c), so the
+         * 2D layer, the pointer and the 3D picking can never drift apart.  `FAST5_UI_FIT`
+         * chooses between one uniform scale (the artwork and the text keep their proportions)
+         * and a per-axis stretch (the layer covers the whole window).
          *
-         * The clip rect is NOT transformed: it is the engine's persistent screen clip, not a
-         * per-draw temporary, so rewriting it would shrink it a little more on every draw
-         * until the 2D layer disappeared. The clip and the destination live in the same
-         * (design) space, so they stay comparable.
+         * Off-screen passes are left alone: the engine renders its 2D screens (the menu's RTT
+         * screens) with the target's own projection, so their content is already in the
+         * target's space and transforming it again would move it off its quads.
+         *
+         * The engine clips the destination against its own screen clip, which lives in the
+         * design space, so the clip has to be converted together with the destination or the
+         * draw is culled away.  The clip is persistent engine state, so it is restored right
+         * after the draw.  If there is no usable clip the draw is left completely alone.
          */
-        {
-            /*
-             * Every 2D draw is scaled from the game's design space (800x480) to the window.
-             *
-             * Only the screen pass is scaled: the engine renders its off-screen 2D screens
-             * (the menu's RTT screens) with the target's own projection, so their content is
-             * already in the target's space and scaling it again would move it off its
-             * quads.
-             */
-            int fbo = gl_bridge_bound_fbo();
-            int rw = g_resolution.frame_w, rh = g_resolution.frame_h;
-            if (fbo != 0) {
-                rw = g_resolution.design_w;
-                rh = g_resolution.design_h;
+        if (gl_bridge_bound_fbo() == 0) {
+            uint32_t dest = c->r1;
+            uint32_t clip = 0;
+            if (c->sp && c->sp + 4u < guest_mem_size) {
+                clip = *(uint32_t *)(mem + c->sp);
             }
-            double px = (double)rw / (double)g_resolution.design_w;
-            double py = (double)rh / (double)g_resolution.design_h;
-            if (px != 1.0 || py != 1.0) {
-                uint32_t dest = c->r1;
-                if (dest && dest + 0x10u < guest_mem_size) {
-                    int32_t *r = (int32_t *)(mem + dest);
-                    int x = r[0], y = r[1], w = r[2] - r[0], h = r[3] - r[1];
-                    int ox = x, oy = y, ow = w, oh = h;
-                    x = (int)floor(x * px + 0.5);
-                    y = (int)floor(y * py + 0.5);
-                    w = (int)floor(w * px + 0.5);
-                    h = (int)floor(h * py + 0.5);
-                    r[0] = x;
-                    r[1] = y;
-                    r[2] = x + w;
-                    r[3] = y + h;
-                    screen_draws++;
-                    if (screen_draws < 4 || (res_trace_draw && screen_draws < 40)) {
-                        fprintf(stderr, "res: draw2D %d,%d %dx%d -> %d,%d %dx%d (fbo %d)\n",
-                                ox, oy, ow, oh, x, y, w, h, fbo);
-                    }
-                    /*
-                     * The engine clips the destination against its own screen clip, which
-                     * lives in the design space. The destination was just scaled, so the clip
-                     * has to be scaled as well or the draw is culled away. The clip is
-                     * persistent engine state, so it is restored right after the draw.
-                     */
-                    if (c->sp && c->sp + 4u < guest_mem_size) {
-                        uint32_t clip = *(uint32_t *)(mem + c->sp);
-                        if (clip && clip + 0x10u < guest_mem_size) {
-                            int32_t *cr = (int32_t *)(mem + clip);
-                            int32_t saved[4];
-                            saved[0] = cr[0]; saved[1] = cr[1];
-                            saved[2] = cr[2]; saved[3] = cr[3];
-                            cr[0] = (int32_t)floor(saved[0] * px + 0.5);
-                            cr[1] = (int32_t)floor(saved[1] * py + 0.5);
-                            cr[2] = (int32_t)floor(saved[2] * px + 0.5);
-                            cr[3] = (int32_t)floor(saved[3] * py + 0.5);
-                            fn_631da0(c, mem);
-                            cr[0] = saved[0]; cr[1] = saved[1];
-                            cr[2] = saved[2]; cr[3] = saved[3];
-                            return 1;
-                        }
-                    }
+            if (dest && dest + 0x10u < guest_mem_size &&
+                clip && clip + 0x10u < guest_mem_size) {
+                int32_t *r = (int32_t *)(mem + dest);
+                int32_t *cr = (int32_t *)(mem + clip);
+                int32_t saved[4];
+                int x = r[0], y = r[1], w = r[2] - r[0], h = r[3] - r[1];
+                int ox = x, oy = y, ow = w, oh = h;
+                int cx, cy, cw, ch;
+                saved[0] = cr[0]; saved[1] = cr[1];
+                saved[2] = cr[2]; saved[3] = cr[3];
+                fast5_resolution_fit_rect(&x, &y, &w, &h);
+                cx = saved[0]; cy = saved[1];
+                cw = saved[2] - saved[0]; ch = saved[3] - saved[1];
+                fast5_resolution_fit_rect(&cx, &cy, &cw, &ch);
+                r[0] = x; r[1] = y; r[2] = x + w; r[3] = y + h;
+                cr[0] = cx; cr[1] = cy; cr[2] = cx + cw; cr[3] = cy + ch;
+                screen_draws++;
+                if (screen_draws < 4 || (res_trace_draw && screen_draws < 40)) {
+                    fprintf(stderr, "res: draw2D %d,%d %dx%d -> %d,%d %dx%d\n",
+                            ox, oy, ow, oh, x, y, w, h);
                 }
+                fn_631da0(c, mem);
+                cr[0] = saved[0]; cr[1] = saved[1];
+                cr[2] = saved[2]; cr[3] = saved[3];
+                return 1;
             }
         }
         return 0;

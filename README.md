@@ -57,13 +57,17 @@ guest faults** in a full boot → menu → race → debrief cycle.
 
 This is the most interesting engineering problem in the port, and it is worth a paragraph.
 
-The game lays its 2D layer out in a **fixed 800×480 space** — menus, HUD anchors, licence text,
-loading widgets — regardless of the screen it is given.  The engine, however, owns its
-screen-size globals and rewrites them: `Application::Init` computes a *logical* size from the
-screen it was handed, and the application is **destroyed and re-created during boot**, which reset
-that logical size and threw the 2D layout outside the window.
+The game lays its 2D layer out on a **fixed 800×480 canvas** — menus, HUD anchors, licence text,
+loading widgets — regardless of the screen it is given.  The engine owns its screen-size globals
+and rewrites them: `Application::Init` computes a *logical* size from the screen it was handed,
+and the application is **destroyed and re-created during boot**, which reset that logical size and
+threw the 2D layout outside the window.
 
-So the port keeps the game's space intact:
+The engine also has what looks like a resolution-independence mechanism (an *application scale*
+at `Application+600`, and HUD anchors that are ratios of `SCR_WIDTH`/`SCR_HEIGHT`).  It is only
+half of one: the scale moves **positions**, not the artwork, and the bitmap font never grows at
+all — so the 2D *screens* (the Universal logo) stay where they were authored and end up in the
+corner of a large screen.  The port therefore keeps the guest's canvas and converts it itself:
 
 | Layer | Runs in | Space |
 |---|---|---|
@@ -72,11 +76,18 @@ So the port keeps the game's space intact:
 | 2D draws, pointer, 3D picking | host | one shared affine transform |
 
 One transform (`runtime/resolution.c`) is shared by every consumer — the 2D draw, the pointer,
-the 3D pick, the camera aspect — so they cannot drift apart.  Getting there required finding
-three separate traps, each documented in [`docs/05-STATE.md`](docs/05-STATE.md):
+the 3D pick, the camera aspect — so they cannot drift apart.  The canvas is 5:3 and the window
+usually is not, so it is fitted with **one uniform scale** and centred: the artwork and the text
+keep the reference proportions exactly, at any window size.  That is the *global resolution
+changer* — change the window size and the whole layer follows.
+
+Getting there required finding several separate traps, each documented in
+[`docs/05-STATE.md`](docs/05-STATE.md):
 
 * the engine's 2D **clip rect** is persistent state and has to be scaled for the duration of a
   draw and restored afterwards, or every scaled draw is culled away;
+* the `draw2DRectangle` override bypassed the shared transform and scaled each axis on its own,
+  so the fit mode had no effect and the 2D was stretched by 6.7 % at 1080p;
 * the soft-float ABI passes a float in a **core register**, not in `s0`;
 * the capture tool was writing every frame **upside down**, so the screenshots used to verify the
   work were mirrored.
@@ -157,8 +168,9 @@ The port reads the game data **in place** and never writes to it.  It creates it
 | Variable | Default | Effect |
 |---|---|---|
 | `FAST5_WIDTH` / `FAST5_HEIGHT` | `1920` / `1080` | the presentation size of the window |
-| `FAST5_UI_FIT` | `fill` | `letterbox` scales the 2D layer uniformly instead of stretching it |
+| `FAST5_UI_FIT` | `letterbox` | `fill` stretches each axis instead (the layer then covers the window, at the cost of 6.7 % distortion at 1080p) |
 | `FAST5_ENGINE_RES` | `native` | `design` runs the engine at 800×480 instead of the window size |
+| `FAST5_UI_2D` | `design` | `native` lets the engine lay the 2D layer out for the window (see below) |
 | `FAST5_WINDOWED` | off | force a framed window instead of borderless |
 | `FAST5_FAKE_GPU` | off | report the PowerVR identity the game expects |
 | `FAST5_AUTO_MENU` | off | drive the title screen into the main menu |

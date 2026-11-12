@@ -20,6 +20,15 @@
  *    maps the design space onto the whole framebuffer, so a design-space rect has to be
  *    pre-scaled to land where the host wants it.
  *
+ * The 2D layer has two ways of reaching the framebuffer:
+ *
+ *  - host-scaled (`ui_native == 0`): the guest lays its 2D out in the fixed 800x480 design
+ *    space and the host scales every draw, the pointer and the 3D pick to the window.
+ *  - engine-native (`ui_native == 1`): the guest is told the real screen size, so the engine
+ *    lays the 2D layer out for it itself (it scales the logical space by the application
+ *    scale factor) and everything already arrives in framebuffer pixels.  The host's
+ *    transform is then the identity.
+ *
  * `fill` mode scales each axis independently so the 2D layer covers the whole framebuffer
  * (the game is stretched by the aspect difference). `letterbox` mode uses one uniform scale
  * and centres the result, so nothing is distorted.
@@ -36,6 +45,7 @@ typedef struct {
     int frame_w, frame_h;     /* the framebuffer / window size */
     int fill;                 /* 1 = fill (per-axis), 0 = letterbox (uniform) */
     int engine_native;        /* 1 = the engine itself runs at the framebuffer size */
+    int ui_native;            /* 1 = the engine lays the 2D layer out for the framebuffer */
     double sx, sy;            /* framebuffer pixels per design pixel */
     double ox, oy;            /* framebuffer offset of the design origin */
     double px, py;            /* how the engine's own projection maps the design space */
@@ -49,7 +59,7 @@ extern Fast5Resolution g_resolution;
  *   engine_native != 0  the engine runs at the framebuffer size
  */
 void fast5_resolution_setup(int design_w, int design_h, int frame_w, int frame_h,
-                             int fill, int engine_native);
+                             int fill, int engine_native, int ui_native);
 
 /* design pixels -> framebuffer pixels */
 void fast5_resolution_to_frame(double dx, double dy, double *fx, double *fy);
